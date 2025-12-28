@@ -33,7 +33,14 @@ function draw(){
   clear(); // pozostaw tło strony (HTML) jako szare
 
   // Najpierw rysujemy viewport (czarny kwadrat) — obszar, gdzie będzie scena
-  drawViewportBackground();
+  // oblicz viewport
+  let side = floor(min(width, height) * 0.75);
+  let vx = floor((width - side) / 2);
+  let vy = floor((height - side) / 2);
+  // narysuj tło viewportu na głównym canvas (czarne)
+  noStroke();
+  fill(0);
+  rect(vx, vy, side, side);
 
   // Przygotuj wierzchołki sześcianu w przestrzeni świata (środek w 0,0,0)
   let verts = cubeVertices(cubeSize);
@@ -55,21 +62,45 @@ function draw(){
   // Obrót sześcianu: zastosuj kolejno roll(Z), pitch(X), yaw(Y)
   let rotated = verts.map(v => rotateVecByEuler(v, cubeAngles.yaw, cubeAngles.pitch, cubeAngles.roll));
 
-  // Projektujemy punkty do współrzędnych ekranu używając kamery
-  let projected = rotated.map(v => projectPoint(v, camPos, camDir));
+  // Przygotuj osie kamery (uwzględniają roll) i rzutuj do współrzędnych viewportu
+  let camAxes = camAxesFromEuler(camAngles.yaw, camAngles.pitch, camAngles.roll);
+
+  // renderujemy scenę do grafiki o rozmiarze viewportu — to automatycznie przytnie wszystko na krawędziach
+  let g = createGraphics(side, side);
+  g.pixelDensity(1);
+  g.background(0);
+
+  // projektuj względem środka bufora
+  let projected = rotated.map(v => projectPoint(v, camPos, camAxes, g.width/2, g.height/2, 700));
 
   // Rysujemy krawędzie i wierzchołki
-  push();
-  translate(0,0); // brak transformacji p5, używamy współrzędnych ekranowych
-  stroke(255);
-  strokeWeight(2);
-  drawCubeEdges(projected);
+  // rysuj do grafiki 'g'
+  g.push();
+  g.stroke(255);
+  g.strokeWeight(2);
+  // edges
+  for(let e of cubeEdges){
+    let a = projected[e[0]];
+    let b = projected[e[1]];
+    if(a && b){
+      g.line(a.screen.x, a.screen.y, b.screen.x, b.screen.y);
+    }
+  }
+  // vertices
+  g.noStroke();
+  g.fill(255,180,0);
+  for(let p of projected){
+    if(p){
+      let r = map(p.depth, 100, 800, 6, 2, true);
+      g.ellipse(p.screen.x, p.screen.y, r, r);
+    }
+  }
+  g.pop();
 
-  // punkty
-  noStroke();
-  fill(255,180,0);
-  drawCubeVertices(projected);
-  pop();
+  // wklej grafikę na główny canvas w miejscu viewportu
+  image(g, vx, vy);
+
+  // HUD na głównym canvas
   drawHUD();
   
 }
@@ -138,29 +169,21 @@ function rotateVecByEuler(p, yaw, pitch, roll){
 }
 
 // Kamera: opisana przez `camPos` i `camDir` (oba p5.Vector). Zwraca punkt w współrzędnych ekranu lub null jeśli za kamerą.
-function projectPoint(worldP, camPos, camDir){
-  // 1) lokalne współrzędne kamery
-  let zAxis = camDir.copy().normalize();
-  // wyznacz oś X kamery (prawo) i Y (góra)
-  let worldUp = createVector(0, 1, 0);
-  // jeśli kamDir równoległy do worldUp, wybierz inny up
-  if(abs(zAxis.dot(worldUp)) > 0.999) worldUp = createVector(0, 0, 1);
-  let xAxis = p5.Vector.cross(zAxis, worldUp).normalize();
-  let yAxis = p5.Vector.cross(xAxis, zAxis).normalize();
+// projectPoint: project world point into screen coords using provided camera axes and screen center
+// camAxes: {xAxis,yAxis,zAxis} in world coordinates
+function projectPoint(worldP, camPos, camAxes, centerX, centerY, f=700){
+  let xAxis = camAxes.xAxis;
+  let yAxis = camAxes.yAxis;
+  let zAxis = camAxes.zAxis;
 
-  // wektor z kamery do punktu
   let rel = p5.Vector.sub(worldP, camPos);
   let cx = rel.dot(xAxis);
   let cy = rel.dot(yAxis);
   let cz = rel.dot(zAxis);
+  if(cz <= 0.0001) return null;
 
-  if(cz <= 0.0001) return null; // punkt za kamerą — odrzuć
-
-  // prosty rzut perspektywiczny
-  let f = 700; // ogniskowa / skalowanie perspektywy
-  let sx = (cx / cz) * f + width/2;
-  let sy = ( -cy / cz) * f + height/2; // minus: y rośnie w dół na ekranie
-
+  let sx = (cx / cz) * f + centerX;
+  let sy = (-cy / cz) * f + centerY;
   return {screen: createVector(sx, sy), depth: cz};
 }
 
@@ -230,4 +253,13 @@ function drawHUD(){
   text(`Cube angles: yaw ${nf(cubeAngles.yaw,1,2)} pitch ${nf(cubeAngles.pitch,1,2)} roll ${nf(cubeAngles.roll,1,2)}`, 10, 52);
   text(`Cam angles: yaw ${nf(camAngles.yaw,1,2)} pitch ${nf(camAngles.pitch,1,2)} roll ${nf(camAngles.roll,1,2)}`, 10, 72);
   pop();
+}
+
+// Build camera axes (xAxis,yAxis,zAxis) from Euler yaw/pitch/roll by rotating basis vectors
+function camAxesFromEuler(yaw, pitch, roll){
+  // use the same order as rotateVecByEuler (roll Z, pitch X, yaw Y)
+  let forward = rotateVecByEuler(createVector(0,0,-1), yaw, pitch, roll).normalize();
+  let right   = rotateVecByEuler(createVector(1,0,0), yaw, pitch, roll).normalize();
+  let up      = rotateVecByEuler(createVector(0,1,0), yaw, pitch, roll).normalize();
+  return { xAxis: right, yAxis: up, zAxis: forward };
 }
