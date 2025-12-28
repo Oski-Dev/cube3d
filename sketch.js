@@ -14,6 +14,10 @@ let controlMode = 'cube';
 let camAngles = { yaw: 0.0, pitch: 0.0, roll: 0.0 };
 let defaultCamPos, defaultCamAngles, defaultCubeAngles;
 let trailG = null; // persistent graphics for vertex trails (same size as viewport)
+let trails = []; // array of {pos: p5.Vector (world), t: seconds}
+let prevWorldVerts = [];
+let trailLife = 3.5; // seconds
+let moveThreshold = 0.5; // world-space movement threshold to create a trail sample
 
 function setup(){
   let cnv = createCanvas(windowWidth, windowHeight);
@@ -71,6 +75,22 @@ function draw(){
   // Obrót sześcianu: zastosuj kolejno roll(Z), pitch(X), yaw(Y)
   let rotated = verts.map(v => rotateVecByEuler(v, cubeAngles.yaw, cubeAngles.pitch, cubeAngles.roll));
 
+  // Dodaj próbki do śladu tylko jeśli wierzchołek zmienił pozycję w przestrzeni
+  let now = millis() / 1000;
+  for(let i=0;i<rotated.length;i++){
+    if(prevWorldVerts[i]){
+      let d = p5.Vector.dist(rotated[i], prevWorldVerts[i]);
+      if(d > moveThreshold){
+        // dodaj próbkę (światowe współrzędne)
+        trails.push({ pos: rotated[i].copy(), t: now });
+      }
+    } else {
+      // init previous positions without creating trails
+    }
+  }
+  // zapisz aktualne world positions jako poprzednie
+  prevWorldVerts = rotated.map(v=>v.copy());
+
   // Przygotuj osie kamery (uwzględniają roll) i rzutuj do współrzędnych viewportu
   let camAxes = camAxesFromEuler(camAngles.yaw, camAngles.pitch, camAngles.roll);
 
@@ -86,12 +106,25 @@ function draw(){
     trailG.clear();
   }
 
-  // fade trails slowly each frame (small alpha -> kilka sekund zaniku)
-  trailG.push();
-  trailG.noStroke();
-  trailG.fill(0, 6); // ~6 alpha frames -> około 3 sekund zaniku przy 60fps
-  trailG.rect(0, 0, trailG.width, trailG.height);
-  trailG.pop();
+  // wyczyść bufor smug i narysuj próbki (usuwając przeterminowane)
+  trailG.clear();
+  // przefiltruj i narysuj
+  for(let i = trails.length-1; i>=0; i--){
+    let item = trails[i];
+    let age = now - item.t;
+    if(age > trailLife){
+      trails.splice(i,1);
+      continue;
+    }
+    // projektuj pozycję próbki do współrzędnych bufora
+    let proj = projectPoint(item.pos, camPos, camAxes, trailG.width/2, trailG.height/2, 700);
+    if(!proj) continue; // poza kamerą
+    let alpha = map(age, 0, trailLife, 220, 0);
+    let size = map(proj.depth, 100, 800, 8, 2, true) * 1.8;
+    trailG.noStroke();
+    trailG.fill(255, alpha);
+    trailG.ellipse(proj.screen.x, proj.screen.y, size, size);
+  }
 
   // projektuj względem środka bufora
   let projected = rotated.map(v => projectPoint(v, camPos, camAxes, g.width/2, g.height/2, 700));
@@ -120,18 +153,8 @@ function draw(){
   }
   g.pop();
 
-  // doklej nowe punkty do trailG (pozostawiają smugę)
-  trailG.push();
-  trailG.noStroke();
-  for(let p of projected){
-    if(p){
-      let r = map(p.depth, 100, 800, 6, 2, true);
-      // trails should be softer and slightly larger, low alpha
-      trailG.fill(255, 40);
-      trailG.ellipse(p.screen.x, p.screen.y, r*2.2, r*2.2);
-    }
-  }
-  trailG.pop();
+  // Nie doklejamy próbek bezpośrednio z projekcji — ślady są tworzone tylko gdy
+  // wierzchołek faktycznie zmienił pozycję w przestrzeni (patrz powyżej).
 
   // wklej grafikę na główny canvas w miejscu viewportu
   // najpierw narysuj smugi (w tle), potem aktualny obraz
