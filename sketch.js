@@ -16,9 +16,17 @@ let defaultCamPos, defaultCamAngles, defaultCubeAngles;
 let trailG = null; // persistent graphics for vertex trails (same size as viewport)
 
 function setup(){
-  createCanvas(windowWidth, windowHeight);
+  let cnv = createCanvas(windowWidth, windowHeight);
+  cnv.style('display','block');
+  cnv.position(0,0);
   pixelDensity(1);
   noSmooth();
+
+  // zapobiegaj domyślnemu przewijaniu strony przy użyciu klawiszy sterowania
+  window.addEventListener('keydown', (e) => {
+    const keys = ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','q','Q','e','E','m','M','r','R'];
+    if(keys.includes(e.key)) e.preventDefault();
+  }, {passive:false});
 
   // Domyślna kamera: trochę z przodu i powyżej, patrzy w stronę środka układu (0,0,0)
   defaultCamPos = createVector(0, 0, 600);
@@ -69,7 +77,7 @@ function draw(){
   // renderujemy scenę do grafiki o rozmiarze viewportu — to automatycznie przytnie wszystko na krawędziach
   let g = createGraphics(side, side);
   g.pixelDensity(1);
-  g.background(0);
+  g.clear(); // transparentny tło — pozwala smudom (trailG) być widocznymi pod rysunkiem
 
   // przygotuj / zainicjuj bufor smug jeśli trzeba
   if(!trailG || trailG.width !== side || trailG.height !== side){
@@ -78,10 +86,10 @@ function draw(){
     trailG.clear();
   }
 
-  // fade trails slightly each frame (draw translucent black rect to darken existing trails)
+  // fade trails slowly each frame (small alpha -> kilka sekund zaniku)
   trailG.push();
   trailG.noStroke();
-  trailG.fill(0, 24);
+  trailG.fill(0, 6); // ~6 alpha frames -> około 3 sekund zaniku przy 60fps
   trailG.rect(0, 0, trailG.width, trailG.height);
   trailG.pop();
 
@@ -118,8 +126,9 @@ function draw(){
   for(let p of projected){
     if(p){
       let r = map(p.depth, 100, 800, 6, 2, true);
-      trailG.fill(255, 100);
-      trailG.ellipse(p.screen.x, p.screen.y, r*1.6, r*1.6);
+      // trails should be softer and slightly larger, low alpha
+      trailG.fill(255, 40);
+      trailG.ellipse(p.screen.x, p.screen.y, r*2.2, r*2.2);
     }
   }
   trailG.pop();
