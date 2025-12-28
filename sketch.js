@@ -13,6 +13,7 @@ let controlMode = 'cube';
 // kąty kamery (Euler): domyślnie patrzy w stronę -Z
 let camAngles = { yaw: 0.0, pitch: 0.0, roll: 0.0 };
 let defaultCamPos, defaultCamAngles, defaultCubeAngles;
+let trailG = null; // persistent graphics for vertex trails (same size as viewport)
 
 function setup(){
   createCanvas(windowWidth, windowHeight);
@@ -70,6 +71,20 @@ function draw(){
   g.pixelDensity(1);
   g.background(0);
 
+  // przygotuj / zainicjuj bufor smug jeśli trzeba
+  if(!trailG || trailG.width !== side || trailG.height !== side){
+    trailG = createGraphics(side, side);
+    trailG.pixelDensity(1);
+    trailG.clear();
+  }
+
+  // fade trails slightly each frame (draw translucent black rect to darken existing trails)
+  trailG.push();
+  trailG.noStroke();
+  trailG.fill(0, 24);
+  trailG.rect(0, 0, trailG.width, trailG.height);
+  trailG.pop();
+
   // projektuj względem środka bufora
   let projected = rotated.map(v => projectPoint(v, camPos, camAxes, g.width/2, g.height/2, 700));
 
@@ -97,7 +112,21 @@ function draw(){
   }
   g.pop();
 
+  // doklej nowe punkty do trailG (pozostawiają smugę)
+  trailG.push();
+  trailG.noStroke();
+  for(let p of projected){
+    if(p){
+      let r = map(p.depth, 100, 800, 6, 2, true);
+      trailG.fill(255, 100);
+      trailG.ellipse(p.screen.x, p.screen.y, r*1.6, r*1.6);
+    }
+  }
+  trailG.pop();
+
   // wklej grafikę na główny canvas w miejscu viewportu
+  // najpierw narysuj smugi (w tle), potem aktualny obraz
+  image(trailG, vx, vy);
   image(g, vx, vy);
 
   // HUD na głównym canvas
@@ -238,6 +267,8 @@ function keyPressed(){
     camAngles = Object.assign({}, defaultCamAngles);
     camPos = defaultCamPos.copy();
     camDir = eulerToDir(camAngles.yaw, camAngles.pitch);
+    // wyczyść smugi
+    trailG = null;
   }
 }
 
