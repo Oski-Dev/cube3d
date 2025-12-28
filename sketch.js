@@ -7,17 +7,26 @@ let camPos, camDir;
 let cubeSize = 200; // długość krawędzi
 let cubeAngles = { yaw: 0.6, pitch: 0.4, roll: 0.0 }; // radiany
 
+// tryb sterowania: 'cube' lub 'camera'
+let controlMode = 'cube';
+
+// kąty kamery (Euler): domyślnie patrzy w stronę -Z
+let camAngles = { yaw: 0.0, pitch: 0.0, roll: 0.0 };
+let defaultCamPos, defaultCamAngles, defaultCubeAngles;
+
 function setup(){
   createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
   noSmooth();
 
   // Domyślna kamera: trochę z przodu i powyżej, patrzy w stronę środka układu (0,0,0)
-  camPos = createVector(0, 0, 600);
+  defaultCamPos = createVector(0, 0, 600);
+  camPos = defaultCamPos.copy();
   camDir = createVector(0, 0, -1); // patrzy w stronę ujemnego Z
 
-  // Domyślne kąty obrotu (można sterować klawiszami)
-  cubeAngles = { yaw: 0.6, pitch: 0.4, roll: 0.0 };
+  // zapamiętaj wartości domyślne do resetu
+  defaultCamAngles = Object.assign({}, camAngles);
+  defaultCubeAngles = Object.assign({}, cubeAngles);
 }
 
 function draw(){
@@ -31,12 +40,17 @@ function draw(){
 
   // Sterowanie klawiszami: strzałki -> yaw/pitch, Q/E -> roll
   const ROT_SPEED = 0.03;
-  if (keyIsDown(LEFT_ARROW))  cubeAngles.yaw  -= ROT_SPEED;
-  if (keyIsDown(RIGHT_ARROW)) cubeAngles.yaw  += ROT_SPEED;
-  if (keyIsDown(UP_ARROW))    cubeAngles.pitch -= ROT_SPEED;
-  if (keyIsDown(DOWN_ARROW))  cubeAngles.pitch += ROT_SPEED;
-  if (keyIsDown(81)) /*Q*/    cubeAngles.roll -= ROT_SPEED;
-  if (keyIsDown(69)) /*E*/    cubeAngles.roll += ROT_SPEED;
+  // active wskazuje na obiekt (cubeAngles lub camAngles) sterowany aktualnie
+  let active = (controlMode === 'cube') ? cubeAngles : camAngles;
+  if (keyIsDown(LEFT_ARROW))  active.yaw  -= ROT_SPEED;
+  if (keyIsDown(RIGHT_ARROW)) active.yaw  += ROT_SPEED;
+  if (keyIsDown(UP_ARROW))    active.pitch -= ROT_SPEED;
+  if (keyIsDown(DOWN_ARROW))  active.pitch += ROT_SPEED;
+  if (keyIsDown(81)) /*Q*/    active.roll -= ROT_SPEED;
+  if (keyIsDown(69)) /*E*/    active.roll += ROT_SPEED;
+
+  // Jeśli sterujemy kamerą, przelicz kierunek
+  camDir = eulerToDir(camAngles.yaw, camAngles.pitch);
 
   // Obrót sześcianu: zastosuj kolejno roll(Z), pitch(X), yaw(Y)
   let rotated = verts.map(v => rotateVecByEuler(v, cubeAngles.yaw, cubeAngles.pitch, cubeAngles.roll));
@@ -56,6 +70,7 @@ function draw(){
   fill(255,180,0);
   drawCubeVertices(projected);
   pop();
+  drawHUD();
   
 }
 
@@ -178,4 +193,41 @@ function drawCubeVertices(projected){
       ellipse(p.screen.x, p.screen.y, r, r);
     }
   }
+}
+
+// Pomocnicze: konwertuj yaw/pitch do wektora kierunku (czasem roll nie wpływa na kierunek)
+function eulerToDir(yaw, pitch){
+  // yaw: obrót wokół Y, pitch: odwrotny obrót wokół X
+  let x = sin(yaw) * cos(pitch);
+  let y = sin(pitch);
+  let z = -cos(yaw) * cos(pitch);
+  return createVector(x, y, z).normalize();
+}
+
+// Key events: M = przełącz tryb sterowania, R = reset pozycji
+function keyPressed(){
+  if(key === 'm' || key === 'M'){
+    controlMode = (controlMode === 'cube') ? 'camera' : 'cube';
+  }
+  if(key === 'r' || key === 'R'){
+    // resetuj wartości
+    cubeAngles = Object.assign({}, defaultCubeAngles);
+    camAngles = Object.assign({}, defaultCamAngles);
+    camPos = defaultCamPos.copy();
+    camDir = eulerToDir(camAngles.yaw, camAngles.pitch);
+  }
+}
+
+// HUD: pokaż tryb i instrukcje
+function drawHUD(){
+  push();
+  noStroke();
+  fill(255);
+  textSize(14);
+  textAlign(LEFT, TOP);
+  text(`Mode: ${controlMode}  (M to toggle)`, 10, 10);
+  text(`Controls: Arrows yaw/pitch, Q/E roll, R reset`, 10, 30);
+  text(`Cube angles: yaw ${nf(cubeAngles.yaw,1,2)} pitch ${nf(cubeAngles.pitch,1,2)} roll ${nf(cubeAngles.roll,1,2)}`, 10, 52);
+  text(`Cam angles: yaw ${nf(camAngles.yaw,1,2)} pitch ${nf(camAngles.pitch,1,2)} roll ${nf(camAngles.roll,1,2)}`, 10, 72);
+  pop();
 }
