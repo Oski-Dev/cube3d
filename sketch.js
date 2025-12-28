@@ -14,10 +14,11 @@ let controlMode = 'cube';
 let camAngles = { yaw: 0.0, pitch: 0.0, roll: 0.0 };
 let defaultCamPos, defaultCamAngles, defaultCubeAngles;
 let trailG = null; // persistent graphics for vertex trails (same size as viewport)
-let trails = []; // array of {pos: p5.Vector (world), t: seconds}
+let trails = []; // array of simple objects {x,y,z,t} to save memory
 let prevWorldVerts = [];
-let trailLife = 3.5; // seconds
+let trailLife = 1.5; // seconds (shorter life to save memory)
 let moveThreshold = 0.5; // world-space movement threshold to create a trail sample
+let maxTrails = 300; // cap total samples to avoid unbounded memory use
 
 function setup(){
   let cnv = createCanvas(windowWidth, windowHeight);
@@ -81,8 +82,13 @@ function draw(){
     if(prevWorldVerts[i]){
       let d = p5.Vector.dist(rotated[i], prevWorldVerts[i]);
       if(d > moveThreshold){
-        // dodaj próbkę (światowe współrzędne)
-        trails.push({ pos: rotated[i].copy(), t: now });
+        // dodaj lekką próbkę (światowe współrzędne) jako prosty obiekt
+        trails.push({ x: rotated[i].x, y: rotated[i].y, z: rotated[i].z, t: now });
+        // ogranicz liczbę próbek
+        if(trails.length > maxTrails){
+          // usuń najstarsze
+          trails.splice(0, trails.length - maxTrails);
+        }
       }
     } else {
       // init previous positions without creating trails
@@ -117,7 +123,9 @@ function draw(){
       continue;
     }
     // projektuj pozycję próbki do współrzędnych bufora
-    let proj = projectPoint(item.pos, camPos, camAxes, trailG.width/2, trailG.height/2, 700);
+    // zrekonstruuj wektor z prostego obiektu
+    let worldV = createVector(item.x, item.y, item.z);
+    let proj = projectPoint(worldV, camPos, camAxes, trailG.width/2, trailG.height/2, 700);
     if(!proj) continue; // poza kamerą
     let alpha = map(age, 0, trailLife, 220, 0);
     let size = map(proj.depth, 100, 800, 8, 2, true) * 1.8;
@@ -132,6 +140,60 @@ function draw(){
   // Rysujemy krawędzie i wierzchołki
   // rysuj do grafiki 'g'
   g.push();
+  // --- Faces: semi-transparent planes ---
+  // define faces as quads (indices into rotated[] / projected[])
+  const faces = [
+    [0,1,3,2], // left
+    [4,5,7,6], // right
+    [0,1,5,4], // bottom
+    [2,3,7,6], // top
+    [0,2,6,4], // back
+    [1,3,7,5]  // front
+  ];
+
+  // collect visible faces with average depth
+  let faceList = [];
+  for(let f of faces){
+    // check that at least one vertex projects
+    let projPts = f.map(i => projected[i]);
+    // compute world positions for normal and center
+    let v0 = rotated[f[0]];
+    let v1 = rotated[f[1]];
+    let v2 = rotated[f[2]];
+    let edge1 = p5.Vector.sub(v1, v0);
+    let edge2 = p5.Vector.sub(v2, v0);
+    let normal = p5.Vector.cross(edge1, edge2).normalize();
+    let center = p5.Vector.add(p5.Vector.add(rotated[f[0]], rotated[f[1]]), p5.Vector.add(rotated[f[2]], rotated[f[3]])).mult(0.25);
+    // view vector from face to camera
+    let viewVec = p5.Vector.sub(camPos, center);
+    // backface culling: draw if normal faces camera
+    if(normal.dot(viewVec) <= 0) continue;
+
+    // compute average depth in camera space (use dot with camAxes.zAxis)
+    let avgDepth = (rotated[f[0]].dot(camAxes.zAxis) + rotated[f[1]].dot(camAxes.zAxis) + rotated[f[2]].dot(camAxes.zAxis) + rotated[f[3]].dot(camAxes.zAxis)) / 4.0;
+
+    // ensure all vertices project (simple approach), otherwise skip
+    if(projPts.some(p=>p===null)) continue;
+
+    faceList.push({ indices: f, avgDepth: avgDepth });
+  }
+
+  // sort by depth (furthest first)
+  faceList.sort((a,b)=> a.avgDepth - b.avgDepth);
+
+  // draw faces
+  for(let fi of faceList){
+    let idx = fi.indices;
+    g.noStroke();
+    g.fill(120, 160, 255, 110); // semi-transparent bluish
+    g.beginShape();
+    for(let vi of idx){
+      let p = projected[vi].screen;
+      g.vertex(p.x, p.y);
+    }
+    g.endShape(CLOSE);
+  }
+
   g.stroke(255);
   g.strokeWeight(2);
   // edges
